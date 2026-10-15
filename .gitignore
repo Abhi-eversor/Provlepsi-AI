@@ -1,0 +1,70 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Private environment files; only the blank setup template is publishable.
+.env*
+!.env.example
+.npmrc
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+venv/
+
+# Python experiments and local development state
+.venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.history/
+Thumbs.db
+Desktop.ini
+
+# Generated outputs, logs and private keys/certificates
+/dist/
+/.next-profiles/
+/.cache/
+/tmp/
+/temp/
+*.log
+*.key
+*.p12
+*.pfx
