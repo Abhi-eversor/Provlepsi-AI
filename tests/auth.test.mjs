@@ -80,3 +80,14 @@ test('database access requires explicit configuration without making a network c
   delete process.env.DATABASE_URL;
   assert.throws(() => getSql(), /DATABASE_URL/);
 });
+
+test('session signing rejects invalid identities and verification rejects future or extended lifetimes', async () => {
+  const key = configureSecret();
+  await assert.rejects(createSessionToken({ userId: 0, email: account.email }), /identity/);
+  await assert.rejects(createSessionToken({ userId: account.userId, email: '' }), /identity/);
+  const now = Math.floor(Date.now() / 1000);
+  for (const [iat, exp] of [[now + 3600, now + 7200], [now, now + 8 * 86400], [now, now - 1]]) {
+    const token = await new SignJWT(account).setProtectedHeader({ alg: 'HS256' }).setIssuedAt(iat).setExpirationTime(exp).sign(key);
+    assert.equal(await verifySessionToken(token), null);
+  }
+});

@@ -1,170 +1,144 @@
-﻿# Adding models and parameters
+# Adding models and parameters
 
-Provlepsi-AI runs dataset parsing and model training in browser workers. Authentication and account storage are server-side. This guide describes the integration points in the current source; a model is supported only after its UI, routing, worker implementation and result handling are connected.
+Provlepsi-AI parses CSVs and trains models in browser workers. Server routes handle authentication. New models must join the shared preparation, evaluation, lifecycle and result contracts; a selectable card or available scientific package alone does not establish a working integration.
 
-The existing forecasting code is experimental. Adding a model does not remove the evaluation, preprocessing or browser limitations documented in [README.md](README.md).
+Read [README.md](README.md) for supported models and research limitations. Preserve meaningful experiments, but label unvalidated behavior accurately.
 
-## Choose the worker and check package compatibility
+## Shared pipeline and contracts
 
-| Worker | Existing model IDs | Role |
+| File | Responsibility |
+| --- | --- |
+| `src/types/forecasting.ts` | Model IDs, settings, prepared partitions, worker output and versioned stored result types. |
+| `src/lib/forecasting.ts` | Settings validation/defaults, chronological split, training-only preprocessing, baseline/metrics and final positioned results. |
+| `src/lib/python-code.ts` | Exact pandas parsing and Python fitting/forecasting source used in the browser and source fixtures. |
+| `src/lib/neural-models.ts` | Seeded neural architectures, training-only scaling, gap-aware windows, fitting and recursive forecasting. |
+| `src/workers/pyodide.worker.ts` | Serialized Python operations and on-demand scientific package loading. |
+| `src/workers/tfjs.worker.ts` | Backend selection, evaluation/final fitting, scoped weight storage and tensor/model cleanup. |
+| `src/lib/workerHelper.ts` | Worker/proxy creation, run identity, cancellation and stale-result protection. |
+| `src/components/StepTrain.tsx` | Parse once, prepare one shared run, route selected models sequentially and store successful results. |
+| `src/components/StepResults.tsx` | Positioned charts, model/baseline metrics, warnings, CSV/PNG/JSON export and project deletion. |
+
+`PreparedRun` contains separate `train`, untouched `validation.actual`, and `final` partitions; original row indices; preprocessing choices/fitted metadata; run settings; baseline information; and warnings. Never reconstruct this information from the 100-row EDA preview or reparse the CSV differently inside a new model.
+
+The forecasting protocol is **fixed-origin recursive**. Fit using `run.train`, predict the entire validation period without actual held-out targets, and evaluate against `run.validation.actual`. Then build a fresh final fit using `run.final` and produce exactly `run.config.horizon` future values. Do not reuse holdout-fitted weights or transformations to calculate evaluation scores.
+
+Default settings are 300 retained rows, a 20% test fraction, 10 lags/window observations, 10 neural epochs, a 10-step future horizon and seed 42. Their authoritative values and bounds are in `forecasting.ts`. All models use the same retained row grid and evaluation cutoff, even when an engine has different input capabilities.
+
+## 1. Select the engine and dependencies
+
+| Worker | Existing IDs | Engine |
 | --- | --- | --- |
-| `src/workers/pyodide.worker.ts` | `arima`, `boosting`, `linear`, `randomForest` | Statsmodels/scikit-learn through WebAssembly Python. |
-| `src/workers/tfjs.worker.ts` | `lstm`, `gru`, `lstmGruHybrid`, `bilstm`, `transformer` | TensorFlow.js layers and browser tensor computation. |
+| `pyodide.worker.ts` | `arima`, `boosting`, `linear`, `randomForest` | Statsmodels/scikit-learn through Pyodide 0.25.0. |
+| `tfjs.worker.ts` | `lstm`, `gru`, `lstmGruHybrid`, `bilstm`, `transformer` | TensorFlow.js layers and tensors. |
 
-The Python worker loads **Pyodide 0.25.0** from `https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js`. Its runtime and scientific packages are downloaded on demand; npm installation does not install a local Python environment or prebundle those packages.
+The versioned Pyodide runtime and scientific packages are downloaded from jsDelivr; `npm ci` does not install local Python or bundle those scientific packages. Check the version-specific [package list](https://pyodide.org/en/0.25.0/usage/packages-in-pyodide.html) and [loading documentation](https://pyodide.org/en/0.25.0/usage/loading-packages.html) before introducing dependencies. Native desktop Python wheels are not automatically WebAssembly-compatible. A runtime upgrade requires its own validation.
 
-Check the version-specific [Pyodide package list](https://pyodide.org/en/0.25.0/usage/packages-in-pyodide.html) and [package loading documentation](https://pyodide.org/en/0.25.0/usage/loading-packages.html) before selecting a dependency. Ordinary native Python wheels are not automatically compatible with WebAssembly. XGBoost is present in that distribution, but it is **not integrated into this application**. Prophet is absent from that package list; `loadPackage('prophet')` is not a supported integration recipe.
+For both engines, assess licensing, bundle/download size, memory use and backend support. Update third-party notices when introducing a new dependency or redistributed asset.
 
-For either worker, review dependency licensing, browser/backend support, download size and memory requirements. Preserve the versioned runtime unless a separately validated migration is intended.
+## 2. Register the model
 
-## 1. Add the model selection entry
+1. Extend `ModelId` in `src/types/forecasting.ts`. `DeepModelId` currently excludes the four Python IDs: update that exclusion for a new Python model so it is not accidentally treated as neural.
+2. Add the ID, readable name and accurate description to the `models` array in `StepModelConfig.tsx`. Its selected-model array and existing checkbox handler collect IDs through `setModelsToTrain`.
+3. Add the readable result name in `StepResults.tsx`.
+4. Extend the `pythonModels` routing list in `StepTrain.tsx` for a Python model; otherwise route the ID through the neural worker's typed API.
+5. Update the worker's supported-ID validation and actual implementation. Unsupported IDs must fail explicitly.
 
-In `src/components/StepModelConfig.tsx`:
+Keep IDs stable: they appear in persisted results and neural model paths. Existing state hydration also filters known IDs in `useStore.ts`; update that allowlist for a new model. Decide how older saved results/configuration should be treated when changing schemas or model behavior.
 
-1. Add a stable model ID to the `selectedModels` initial-state object, usually with `false` as its default.
-2. Add a matching card/checkbox using the existing `handleToggle` function and `selectedModels` state.
-3. Describe the implemented model accurately. Mark research models as experimental and avoid unsupported performance claims.
+## 3. Implement the engine
 
-For example, a scikit-learn Ridge integration could use the ID `ridge`:
+### Python
 
-```tsx
-// Add this property alongside the existing selectedModels entries:
-ridge: false,
-```
-
-```tsx
-<div onClick={() => handleToggle('ridge')}>
-  <input type="checkbox" checked={selectedModels.ridge} readOnly />
-  <span>Ridge Regression</span>
-</div>
-```
-
-Adapt the card to the existing styles and input behavior. `handleContinue` already collects enabled IDs and writes them through `setModelsToTrain`; there is no `toggleModel` helper.
-
-## 2. Route training to the correct worker
-
-`src/components/StepTrain.tsx` runs selected models sequentially. Preserve sequential execution for Pyodide: its input values are written to shared Python globals, so concurrent training would race.
-
-### Python models
-
-Extend the Python-model condition in `runTraining` to include the new ID. The actual worker signature is:
+The exposed API is:
 
 ```ts
 trainModel(
-  modelType: string,
-  csvContent: string,
-  targetCol: string,
-  modelParams: any = {},
-  progressCallback?: (message: string) => void
-)
+  modelType: ModelId,
+  run: PreparedRun,
+  progressCallback?: (message: string) => void,
+): Promise<WorkerTrainingResult>
 ```
 
-Pass parameters before the callback, as the existing code does:
+1. Extend the accepted Python IDs in `pyodide.worker.ts` and select the required lazy-loaded package. Related scikit-learn estimators can reuse the current package.
+2. Add a matching branch in `forecast_partition` in `src/lib/python-code.ts`. It receives a prepared historical partition, forecast length, model ID and validated settings.
+3. Build features using only that partition. Current regression/ensemble models use configurable target lags and contemporaneous numeric covariates during fitting; recursive prediction freezes covariates at their final historical values. If a new model needs future inputs, add an explicit input contract instead of reading validation features.
+4. Preserve gaps. Null targets/features arrive in Python as missing values. Skip lag windows crossing gaps and reject unusable recent context with an actionable message. ARIMA's state-space handling keeps missing positions; do not compress the time grid to emulate this for another estimator.
+5. Return finite original-unit predictions. Surface convergence/runtime warnings and report the model's actual assumptions.
+6. Preserve the existing separate evaluation/final calls. Shared TypeScript helpers calculate metrics against unchanged validation truth.
 
-```tsx
-const pyodide = getPyodideAPI();
-if (!pyodide) throw new Error('Pyodide worker unavailable');
+Worker operations are serialized because they share Python globals. Transfer input through `globals.set` and JSON, never by interpolating user-controlled values into executable Python. Delete transient globals and destroy owned proxies when finished. Do not introduce parallel Python fitting without replacing the shared-state contract safely.
 
-const result = await pyodide.trainModel(
-  model,
-  rawData.rawContent,
-  targetColumn,
-  modelParams,
-  Comlink.proxy((message: string) => {
-    setTrainingStatus(previous => ({
-      ...previous,
-      [model]: { status: 'training', progress: message },
-    }));
-  })
-);
-```
+### TensorFlow.js
 
-This snippet belongs inside the existing training function, where those variables are defined. Passing the callback as argument four would populate `modelParams` incorrectly.
-
-### TensorFlow.js models
-
-Add the new ID to both `DEEP_MODEL_TRAINERS` and `DEEP_MODEL_DISPLAY_NAMES`. The trainer map points to an exported `TfjsAPI` method; its current caller passes:
+The exposed API is:
 
 ```ts
-trainMyModel(
-  data: number[],
-  epochs: number,
-  unitsOrModelSpecificSize: number,
-  progressCallback?: (epoch: number, logs: any) => void
-)
+trainModel(
+  modelId: DeepModelId,
+  run: PreparedRun,
+  modelKey: string,
+  progressCallback?: (
+    epoch: number,
+    logs: Record<string, number>,
+    phase: 'evaluation' | 'final',
+  ) => void,
+): Promise<WorkerTrainingResult>
 ```
 
-The existing UI supplies ten epochs and a size argument of 50. Update the caller deliberately if the new method needs a different contract. The target extractor currently receives the raw CSV and uses simple line/comma splitting; account for its limitations rather than assuming full pandas CSV semantics.
+Epochs are one-based. The worker selects a working WebGPU/WebGL/CPU backend, trains/evaluates a training-only fit, disposes it, then trains the separate final model. It saves final weights under `indexeddb://${modelKey}` and disposes the model afterward. `modelKey` comes from `modelStoragePrefix(accountId, projectId)` plus run/model IDs; never use an unscoped timestamp-only key.
 
-## 3. Implement the worker
+Add architecture branches in `buildNeuralModel` in `src/lib/neural-models.ts`. Reuse `fitNeuralModel` and `recursiveNeuralForecast` unless the new family requires a deliberately extended contract:
 
-### Python implementation
+- Fit the scaler only on the supplied historical partition; retain its parameters in the returned artifact.
+- Preserve original temporal gaps when building windows. Never concatenate disconnected target observations.
+- Validate minimum sample/context size and all emitted losses/predictions. Do not return empty metrics as zero-error success.
+- Seed initialization and stochastic settings where supported. Keep training sample order fixed; report browser/GPU nondeterminism honestly.
+- Dispose temporary tensors, models and owned optimizers in success and failure paths. A persisted model must not remain allocated solely because its weights were saved.
+- Register custom layers with TensorFlow.js serialization and test weight reload. Layer-normalization dimensions must preserve an input-dependent representation.
 
-In `src/workers/pyodide.worker.ts`:
+The repaired Transformer uses a 16-dimensional embedding, sinusoidal positions, scaled self-attention, residuals and vector normalization. It is a structurally checked research reference, not an accuracy benchmark. Current neural models use only the target; adding multivariate inputs requires corresponding feature/scaler metadata and saved-model compatibility work.
 
-1. Extend the lazy package-loading branch to include the new ID. A Ridge model would reuse the existing `scikit-learn` package rather than require another runtime.
-2. Pass any new validated parameters with `pyodideInstance.globals.set(...)`, following the existing parameter bindings. Do not interpolate user-controlled strings directly into Python source.
-3. Add a matching branch inside Python `run_training()`.
-4. Validate input size, numeric values and parameter ranges. Construct appropriate chronological training/holdout data and generate the forecast.
-5. Set `metrics` and `forecast` before the existing JSON return. Return JSON-compatible finite numbers and surface failures as errors rather than success-shaped empty results.
+## 4. Return a complete, honest result
 
-The current Python pipeline reads the raw CSV, applies fixed forward/backward filling and keeps at most the last 500 rows. Its EDA preprocessing selections are not passed in. If a contribution changes those assumptions, update both the caller and documentation explicitly.
-
-Progress messages can be sent before package loading or fitting. The existing short delays yield execution after a message; they are not a guarantee against deadlocks or failed scientific-library execution. Test the actual package/model in a browser.
-
-### TensorFlow.js implementation
-
-In `src/workers/tfjs.worker.ts`:
-
-1. Add an asynchronous trainer to the `tfjsAPI` object and call `await this.init()` before tensor operations.
-2. Prepare chronological sequences and define the layers, compilation and training settings.
-3. Report epoch progress with the existing callback contract, including a numeric `loss` if using the unchanged `StepTrain` progress display.
-4. Evaluate and forecast in original target units. The existing `evaluateAndForecast` helper expects the worker's sequence/scaling contract and generates ten iterative predictions.
-5. Return `metrics` and `forecast`; include `modelName` if saving a model under an `indexeddb://` URL as existing trainers do.
-6. Dispose temporary tensors and models when no longer needed, including failure paths. A saved model should not remain allocated merely because its weights were persisted.
-
-`TfjsAPI` is inferred from the exposed object, so a new method becomes part of that type. Keep runtime API methods consistent with `DEEP_MODEL_TRAINERS`.
-
-The shared preparation helper currently uses the last 300 observations, ten-observation windows and a fixed 80/20 split. It fits min/max scaling on the whole retained series, including the holdout. Avoid copying that leakage into a new evaluation design. Saved model weights alone do not preserve a complete forecasting pipeline; a future reload feature also needs preprocessing/scaling metadata and input validation.
-
-The current `transformer` implementation normalizes a single-feature representation, collapsing it to input-independent predictions. Do not use that model as a validated reference architecture.
-
-## 4. Connect results and persistence
-
-Both worker paths must provide the result fields used by `StepTrain.tsx`, the Zustand store and `StepResults.tsx`:
+The worker output is defined centrally:
 
 ```ts
-type ModelResult = {
-  metrics: {
-    rmse: number;
-    mae: number;
-  };
-  forecast: number[];
-};
+interface WorkerTrainingResult {
+  metrics: Metrics;                 // rmse, mae, observed count n
+  baseline: Metrics;
+  evaluationPredictions: number[];   // one per validation row, including missing-truth rows
+  forecast: number[];                // exactly config.horizon values
+  modelName?: string;
+  artifact?: Record<string, unknown>;
+  warnings?: string[];
+}
 ```
 
-Current forecasts contain ten values. Extend `getModelName` in `StepResults.tsx` for a readable results label; adding a name to the training map does not update that separate helper.
+`createModelResult` rechecks forecasts and recomputes evaluation metrics centrally. It records original row positions, observed history, cutoff, baseline, configuration, preprocessing fits, model artifact, warnings, creation time and pipeline version. Charts and exports consume those positions directly, so forecasts follow the actual final observation even when history is capped.
 
-Only successful results are copied into `modelResults`. If result fields or forecast length change, inspect the store type, metric display, graph and CSV export together. The displayed/exported history currently comes from the first 100-row preview, while training can use the full retained tail; do not describe those indices as a verified full-history timeline.
+Do not alter held-out truths, change the test period for one model, consume observed test targets recursively, or substitute in-sample residuals for holdout errors. A model that evaluates a different task needs a separate labelled result protocol and comparison group.
 
-Deep models are saved to IndexedDB, but the UI does not currently expose a model reload/export flow. `storage.saveCleanedData`, `storage.getCleanedData` and `storage.clearAll` are not connected to the wizard. Do not imply those helper methods provide completed user-facing features.
+Shared preprocessing currently treats row drop as a complete-numeric-row rule. Any retained numeric feature can mark an entire row missing, even for a univariate model. Backward fill is restricted to the supplied known-history partition; future validation truths remain untouched. Document any contribution that changes these policies.
 
-## 5. Add adjustable parameters
+Run-details JSON includes settings, preprocessing/scaler metadata, positions, predictions and reported runtime versions; it does not contain original CSVs or weights. Neural weights remain in browser IndexedDB with account/project ownership, and the UI does not yet offer reload/portable-weight export. Python fitted estimators are not persisted. Do not describe metadata export as a complete portable model bundle.
 
-For every new parameter:
+## 5. Add adjustable settings
 
-1. Extend `AppState['modelParams']` in `src/store/useStore.ts` and supply defaults in both initial state and `reset`.
-2. Add a control to `StepModelConfig.tsx`, using `setModelParams`.
-3. Pass the value from `StepTrain.tsx` to the appropriate worker. Python already receives the `modelParams` object; deep trainers currently receive positional arguments instead.
-4. Validate type, finiteness and range in the worker. UI min/max attributes are not sufficient because state is persisted and values can arrive through other callers.
-5. Bind it through Python globals or the appropriate TF.js layer/compiler/training option.
-6. Document which models consume it. The existing split fraction affects linear regression/random forest, not every model.
+1. Extend `RunSettings` in `src/types/forecasting.ts` and `DEFAULT_SETTINGS`/`validateSettings` in `forecasting.ts`.
+2. Add a control in `StepModelConfig.tsx`; identify which model consumes it. UI min/max attributes do not replace pipeline validation.
+3. Consume the field through `run.config` in the engine; avoid incompatible positional trainer arguments.
+4. Include effective model-specific values in artifacts and update documentation.
+5. Review old account-scoped localStorage values: defaults merge during hydration, but incompatible saved schema/behavior may require a version change or migration.
 
-Changing persisted state also requires considering existing localStorage values. New defaults must not make an old saved wizard state fail unexpectedly.
+The shared split fraction, history cap, lookback and future horizon affect all applicable model paths. Epochs affect neural training; forest parameters affect random forest. ARIMA's order is fixed unless explicitly extended.
 
-## 6. Verify and document the integration
+## 6. Preserve lifecycle and storage behavior
 
-Run the repository checks:
+`StepTrain.tsx` associates work with a generation/run identity and discards stale results. Navigation, cancellation, account changes and logout terminate active workers; the next operation recreates them. Use `awaitWorkerResult` and the existing active-run checks rather than storing results from unguarded callbacks.
+
+Persist data through account/project-scoped storage helpers. Extend `deleteProject`/`clearAccount` when adding a new artifact store. Deletion must be awaited and errors must be visible. Legacy unscoped data is deliberately not assigned to the next logged-in account.
+
+## 7. Verify and document
 
 ```sh
 npm run lint
@@ -173,8 +147,8 @@ npm test
 npm run build
 ```
 
-The current automated tests cover focused authentication security regressions, not model correctness or browser workers. Perform a browser smoke check of upload, model selection, training progress, finite metrics, forecast length, charts and CSV/PNG exports. Check the actual package download and the intended TF.js backend.
+Add meaningful regressions for the new behavior: leakage isolation, quoted/malformed CSVs, missing/outlier policies, capped-history indices, fixed-origin evaluation, finite outputs, short/constant series, seeded behavior, serialization and resource cleanup where relevant. Use a last-value baseline without assuming the new model will outperform it. Do not turn synthetic learning fixtures into claims about real-world forecast quality.
 
-For a forecasting evaluation, record the real dataset/source, row ordering, split, preprocessing, seed where supported and error definition. Use held-out chronological observations and fit transformations on training data when making comparison claims. Current ARIMA/boosting training-fit metrics are not equivalent to other models' holdout metrics.
+Then exercise the actual browser worker: runtime/package loading, default and nondefault settings, progress, cancellation/retry, output length, charts, CSV/PNG/JSON exports, and deletion of saved artifacts. CPU unit tests do not validate GPU kernels, scientific WebAssembly packages or browser IndexedDB.
 
-Update the README model table, limitations and third-party notices when support is actually implemented. Keep experiment notes and measured results accurate; package availability, a successful build or a selectable UI card alone do not demonstrate a working forecasting integration.
+The real Neon authentication integration test is separately opt-in through `AUTH_TEST_DATABASE_URL`; it is unrelated to model correctness. Record successful, failed, skipped and unexecuted checks distinctly. Update the README model table and limitations only for behavior actually implemented and verified.

@@ -1,253 +1,92 @@
-# Pre-publication audit: Provlepsi-AI
+# Implementation repair and verification report
 
-**Audit date:** 2026-10-13 (Asia/Calcutta). **Validation environment:** Windows, Node.js 24.12.0, npm 11.7.0 and production Chrome. The audit covers the application directory containing `package.json`, currently named `time-series-autoML-main`.
+**Date:** 2026-10-25 (Asia/Calcutta). This report describes the implementation repairs following the publication audit. The [October 13 audit](docs/audits/2026-10-13-publication.md) is retained as a historical snapshot; its dependency counts, limitations, directory layout and proposed initial-import instructions are not the current state.
 
-## 1. Publication-readiness assessment
+## Assessment and scope
 
-**Conditionally suitable for publication as an experimental source repository; not production-ready.** Source, configuration, setup documentation, the database schema and third-party notices are now present. The final clean dependency installation, TypeScript check, lint, seven focused authentication tests and production build passed. A repeated production browser smoke check exercised all nine model routes on a 60-row synthetic CSV; actual PNG/CSV export and sign-out checks also passed. Publication still requires an ownership/licensing decision and a decision on the remaining dependency advisories described below.
+The existing Next.js/React application, browser Python/neural worker architecture and nine forecasting families are preserved. The repairs address preprocessing integration, evaluation leakage/comparability, the Transformer representation defect, chart/export alignment, account storage, cancellation, authentication and repeatable checks. Existing Git history and the Apache 2.0 license were present at the start of this work and have been preserved. No commit, staging, push or remote modification was performed.
 
-The implemented architecture remains intact: Next.js/React pages and authentication routes, Neon account storage, Zustand/localStorage state, IndexedDB datasets/models, Comlink workers, Pyodide scientific Python and TensorFlow.js. Existing algorithms and research implementations were preserved. No model performance results or development history were fabricated.
+This remains an **experimental forecasting application**. Structural and integration checks do not demonstrate accuracy, production security, large-data performance or compatibility with every browser/GPU.
 
-At intake, the proposed source set contained **41 files totaling 495,502 bytes**, excluding installed dependencies and generated outputs. The largest was `package-lock.json` at 362,085 bytes. No oversized source files, exact duplicate publication files or nested Git repositories were detected. There was no project Git history to preserve, and none was manufactured. Five unused starter SVGs and the existing favicon were retained and attributed.
+## Forecasting correctness
 
-No commit, push, GitHub repository creation or remote modification was performed. Temporary snapshots, audit outputs, synthetic fixtures and an ignore-check Git directory were kept outside the application. That temporary Git metadata was used to enumerate publication candidates without initializing or staging the project itself.
+- One typed contract and preparation implementation is shared by both worker engines. Settings are validated and each run records original row indices, source CSV SHA-256, target, data ranges, preprocessing fits, seed/configuration, evaluation predictions, future predictions, warnings and available engine versions.
+- pandas parses CSVs for every model; direct comma/line splitting has been removed. UTF-8, file size, row/column limits, unique headers, strict quoting and logical-record field counts are checked before pandas can infer an unintended index. Numeric target coercion rejects malformed/infinite values. The upload remains unchanged.
+- Training history is capped consistently across models (default 300 rows, configurable 50–2,000). Evaluation preprocessing is fitted on the training partition only. Missing-value/outlier choices are operational and have a processed preview with transformation counts.
+- Validation targets stay original. Missing truths are excluded from metric counts rather than filled, clipped or assigned zero error. The baseline repeats the last originally observed training target.
+- Every model evaluates the full chronological holdout recursively from one fixed origin. Test targets and future covariates are not fed into recursive predictions. Additional numeric covariates for lag-based Python regressors remain fixed at their last known value, with an explicit warning.
+- A separate preprocessing/model fit on all retained observed history produces future forecasts. Its fit is distinct from the earlier holdout evaluation; metric labels and plot traces make that distinction visible.
+- Row dropping retains excluded positions as gaps on the original grid. Lag windows crossing gaps are excluded; incomplete recent context is rejected explicitly. ARIMA retains missing positions for its state-space implementation. The complete-numeric-row policy is documented, including its effects on univariate models.
+- Transformer attention now operates on a 16-dimensional embedding with positions, scaled attention and dimension-preserving residual normalization. The scalar output is produced at the end. Existing recurrent families retain their 50-unit default; initialization is seeded and training order fixed. The Transformer remains experimental.
+- Neural backend initialization probes real kernel execution and falls back from WebGPU to WebGL to CPU. Temporary tensors, models and optimizers are disposed on success and failure.
 
-## 2. Issues to address before publication
+## Results, storage and lifecycle
 
-### Source ownership and license
+- Results, CSV exports and charts use actual run positions. A preview length no longer determines forecast origin. History, holdout predictions and future forecasts are distinguished; baseline errors and scored observation counts are visible.
+- PNG export waits for chart initialization. CSV fields are escaped and object URLs released. Run JSON exports configuration, preprocessing/scaler information, predictions and provenance; it does not export source CSVs or model weights.
+- Zustand state, IndexedDB datasets and neural model paths are scoped by verified account and UUID project. Account lookup gates the wizard, and identity is rechecked when focus returns. Stale overlapping identity responses are ignored; login in another tab invalidates the active identity and stops its work.
+- Sign-out clears the active account's local data and saved neural weights. Current-project deletion is explicit and awaited. Starting a new project preserves earlier local datasets/weights until deletion or sign-out. Legacy unscoped data is detected without adoption or silent deletion; a separate action deletes it.
+- Cross-tab logout/project deletion stop affected work. Worker run identifiers, cancellation-aware waits, termination, proxy release and callback guards prevent stale results from overwriting newer work. Upload/training failures are visible and retryable.
+- IndexedDB cleanup no longer creates an empty, incompatible TensorFlow database. Expected upgrade cancellation and transaction failure paths have regression coverage against unhandled promise errors.
 
-Confirm the right to publish and license the original source, including any copied contributions. No project `LICENSE` was added. Apache License 2.0 is the recommended source license **only after the owner confirms those rights**; third-party material retains its own licenses. The old README MIT badge was removed because it did not establish a license grant. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the [official Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0.html).
+Account namespaces prevent accidental mixing; they do not encrypt browser data or protect it from a person controlling the browser profile. Use an appropriate device/data policy for sensitive datasets.
 
-### Remaining dependency advisories and the CI gate
+## Authentication and required database migration
 
-The initial npm audit reported **18 affected dependency nodes: 3 critical, 12 high and 3 moderate**. Compatible updates and dependency cleanup reduced the October 13 result to **8 affected nodes: 0 critical, 5 high and 3 moderate**. These totals include propagated dependency findings; they are not eight independent vulnerabilities.
+- Bounded UTF-8 JSON parsing checks streamed body size, content type, field types and lengths. Emails are normalized; new passwords require at least 12 characters and at most 72 UTF-8 bytes. Existing shorter passwords and legacy long bcrypt passwords remain usable for login, with a 1,024-byte login limit and the existing hashes' original 72-byte truncation semantics.
+- Login/signup/logout mutations require the correct origin. Optional `APP_ORIGIN` supports an explicitly configured public reverse-proxy origin. Credentials and internal database errors are not returned in service-failure responses.
+- A normalized-email unique index and atomic insertion protect simultaneous signup. Existing case-insensitive duplicates are reported for deliberate owner reconciliation, never silently merged or removed.
+- Atomic PostgreSQL attempt counters apply across server instances. Counter keys use HMACs rather than raw email addresses or untrusted client IP headers. Rate-limit failures return `429`/`Retry-After`; unavailable configuration/schema fails closed.
+- JWT signature/algorithm/identity/lifetime checks and HTTP-only, SameSite cookies are retained and strengthened. Production cookies are Secure; deploy behind HTTPS.
 
-| Remaining chain | npm counts | Scope and unresolved issue |
-| --- | --- | --- |
-| `eslint-config-next` → `@next/eslint-plugin-next` → `fast-glob` → `micromatch` → `braces` | 5 high nodes | Development/lint tooling. Deeply nested brace patterns can exhaust the stack. The advisory lists no patched `braces` version at the audit date. [Braces advisory](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). |
-| `@tensorflow/tfjs` → `argparse` → `sprintf-js` | 3 moderate nodes | Production dependency graph. Unbounded precision formatting can cause denial of service. Dependency presence alone does not establish reachability through this application's UI. [sprintf-js advisory](https://github.com/advisories/GHSA-hp3w-g68c-fv3c). |
+**Before deploying these routes:** apply [db/schema.sql](db/schema.sql) to a new database, or review and apply [db/migrations/001_auth_hardening.sql](db/migrations/001_auth_hardening.sql) to an existing database. Resolve any normalized-email duplicates reported by that migration. The application does not run migrations automatically. No real user database was modified during this work.
 
-`npm audit --audit-level=high` **fails with exit code 1**, and the retained GitHub workflow uses that full audit gate. `npm audit --omit=dev --audit-level=high` **passes with exit code 0**, but still reports the three moderate nodes. Omitting development dependencies does not clear the full repository audit or make the workflow pass.
+## Dependencies and verification
 
-npm's force-remediation proposals include incompatible downgrades to `eslint-config-next` 14.2.35 and TensorFlow.js 2.1.0. Those were not applied. Resolve the remaining chains when a compatible fix is available, or explicitly approve the documented unresolved risk and the resulting failing audit gate before publication. The gate was not silently disabled and no unsupported overrides were introduced.
+Compatible updates moved Next.js and its ESLint configuration to **16.4.3**, and updated vulnerable transitive resolution. Playwright is a development dependency for reproducible isolated browser checks. The full audit gate remains enabled; it was not weakened or restricted to production dependencies.
 
-## 3. Improvements that can wait for a subsequent development cycle
-
-These concerns are disclosed in the README and interface, rather than addressed through an architectural rewrite:
-
-- Wire the saved missing-value/outlier controls into a validated preprocessing pipeline. Current training ignores those choices and uses its own built-in filling.
-- Use consistent chronological holdouts/backtests, fit scaling on training data, label metrics by their evaluation method and seed experiments where supported. ARIMA/boosting currently use training-fit metrics; deep scaling includes holdout observations.
-- Repair and validate the experimental Transformer representation. Its single-feature normalization collapses input variation and yields input-independent predictions; it remains preserved research code.
-- Correct the results/history/export timeline for datasets longer than the 100-row preview. Training uses a retained tail of up to 500 Python rows or 300 deep-model rows.
-- Replace deep-model comma/line splitting with proper CSV extraction, validate short/nonfinite inputs and parameter ranges, and consider an explicit forecast-horizon contract.
-- Add cancellation, worker/proxy/model disposal, model reload metadata, storage quota handling and browser/device compatibility coverage.
-- Isolate browser state by account and provide a clear local-data deletion action before using the application on shared browsers or deploying it as a multiuser service.
-- Harden authentication request validation, error handling and abuse protection; add rate limiting and account verification/recovery where required for deployment.
-- Exercise real Neon signup/login/logout and database errors, add model-correctness and end-to-end coverage, and run Linux CI/CodeQL before making production assurances.
-
-## 4. Files changed, added, retained and excluded
-
-**Nineteen original files changed, seven files added, zero source files deleted.** No major algorithm or application architecture was replaced.
-
-### Changed original files
-
-| File | Reason |
+| Check | Result and scope |
 | --- | --- |
-| `.github/workflows/pr-checks.yml` | Add first-push/manual checks, Node 24, route type generation and authentication tests; retain the full security audit gate. |
-| `.gitignore` | Exclude private environment/npm configuration, keys, editor/Python caches and generated outputs; allow only the blank environment template. |
-| `ADDING_MODELS.md` | Replace outdated helpers/signatures and unsupported dependency-loading examples with actual UI/worker/result/parameter integration steps. |
-| `README.md` | Accurate project identity, features, setup, architecture, privacy, evaluation methods, verification scope and research limits; remove unsupported MIT claim. |
-| `package-lock.json` | Lock compatible security updates and dependency cleanup; retain reproducible npm resolution. |
-| `package.json` | Node minimum, typecheck/test commands, Next.js/config version floors and removal of unused/deprecated or duplicate dependencies. |
-| `src/app/api/auth/login/route.ts` | Obtain an explicitly configured database client at request time. |
-| `src/app/api/auth/me/route.ts` | Obtain the configured database client after session verification. |
-| `src/app/api/auth/signup/route.ts` | Validate session configuration before account insertion and obtain the database client lazily. |
-| `src/app/layout.tsx` | Replace Create Next App metadata with accurate project metadata. |
-| `src/components/StepEDA.tsx` | Disclose inactive preprocessing controls and use the shared, typed Plotly browser bundle for PNG export. |
-| `src/components/StepModelConfig.tsx` | Explain split-slider applicability and the known experimental Transformer defect. |
-| `src/components/StepResults.tsx` | Disclose differing metrics and partial history; use the shared Plotly browser bundle for PNG export. |
-| `src/components/StepTrain.tsx` | Fix two `prefer-const` lint errors while preserving numeric extraction and model routing. |
-| `src/components/StepUpload.tsx` | Accurate dataset/account privacy wording and click-to-upload behavior. |
-| `src/lib/auth.ts` | Remove the known fallback signing key; reject absent/weak/padded secrets, constrain HS256 and validate identity/time claims. |
-| `src/lib/db.ts` | Remove the dummy database URL; require explicit configuration only when a database operation is requested. |
-| `src/store/useStore.ts` | Allow null for undefined/nonfinite preview statistics and correlations. |
-| `src/workers/pyodide.worker.ts` | Use pandas JSON serialization for preview statistics so constant/single-row data produces valid JSON. |
+| Clean `npm ci` | Passed: 625 packages installed from the lockfile; 626 audited. |
+| `npm run typecheck` | Passed after clean installation and the identity/CSV corrections. |
+| `npm run lint` | Passed after clean installation; zero errors/warnings. |
+| `npm test` | Passed: 43 tests passed, zero failed; one live Neon integration test explicitly skipped because `AUTH_TEST_DATABASE_URL` was not supplied. Includes actual legacy bcrypt compatibility. |
+| `npm run build` | Passed on Next.js 16.4.3 after the final source changes; all routes generated. |
+| `npm run test:storage:browser` | Passed in isolated production Chrome: 13 assertions, including owned deletion, failure/retry paths and no unhandled browser errors. |
+| `npm run test:browser` | Passed on the final production build in isolated Chrome: all nine models on 620 synthetic rows; applied preprocessing; common holdout; nondefault settings; correct forecast indices/source hash; actual CSV/JSON/PNG downloads; reload; cancellation; account switching; cross-tab logout and owned deletion. Additional real Pyodide fixtures rejected six malformed inputs and accepted BOM/quoted/multiline fields. Delayed account-response ordering and cross-tab identity invalidation passed. Zero browser errors. |
+| Isolated PostgreSQL-compatible SQL harness | Passed schema/idempotent migration, concurrent normalized signup, real bcrypt login, shared limit counters/reset/cleanup and safe response checks. Temporary PGlite harness outside the repository; this is not Neon connectivity evidence. |
+| `npm audit --audit-level=high` | Passed after clean installation: zero reported vulnerabilities. This is the registry's result at the check date, not a claim that all possible vulnerabilities are absent. |
+| Live Neon integration | Unexecuted: no dedicated test credentials supplied. The opt-in test uses a random isolated schema and never uses `DATABASE_URL` or production `public.users`. |
+| Linux GitHub Actions/CodeQL, other browser/GPU matrix, accuracy/performance benchmarks | Unexecuted locally. Updated CI includes unit, build, browser storage, production browser smoke and security checks. |
 
-### Added files
+Install a test browser with `npx playwright install chromium`, then run the browser scripts after `npm run build`. An installed Chrome can be selected with `PLAYWRIGHT_CHANNEL=chrome`. Tests use isolated profiles, synthetic CSVs and an intercepted account lookup; they do not bypass authentication in application code or claim real Neon login coverage.
 
-| File | Reason |
-| --- | --- |
-| `.env.example` | Blank server configuration template and random-secret generation instructions; no actual credentials. |
-| `.nvmrc` | Select Node.js 24 for development and CI. |
-| `AUDIT_REPORT.md` | Record this publication audit, actual validation, unresolved issues and proposed commit contents. |
-| `THIRD_PARTY_NOTICES.md` | Verified starter-asset attribution and dependency/runtime/font licensing inventory. |
-| `db/schema.sql` | Supply the users schema required by the existing authentication routes. |
-| `src/types/plotly-dist.d.ts` | Type the Plotly browser-bundle entry used by React charts and image export. |
-| `tests/auth.test.mjs` | Seven focused authentication/configuration regression tests without database/network calls. |
+An earlier browser run caught an unhandled IndexedDB `AbortError` during cleanup. The database existence probe and aborted-transaction handling were repaired and covered by storage failure-path checks; the repeated full browser run passed without suppressing browser errors. Tests use one neural epoch to exercise integration in bounded time, not to establish model quality.
 
-### Dependency changes and retained material
+## Remaining limitations
 
-- Next.js **16.2.11 → 16.4.0**, with matching `eslint-config-next` 16.4.0 and compatible lockfile security updates. The initial audit included critical Next.js findings, including [Windows server remote-code execution](https://github.com/advisories/GHSA-p293-qw3h-jr36); the final npm audit reports no critical nodes.
-- Removed unused npm `pyodide`; the actual browser runtime remains the versioned CDN Pyodide 0.25.0. Removed deprecated stub `@types/bcryptjs`; Bcryptjs already supplies types.
-- Removed duplicate `plotly.js-dist-min` 3.7.0, whose bundled MapLibre GL 4.7.1 was affected by the [MapLibre sanitizer advisory](https://github.com/advisories/GHSA-jrc7-96c5-q579). The application now declares `plotly.js` 4.1.2, already used by React Plotly, and imports the same `plotly.js/dist/plotly` browser bundle for image export.
-- The first attempt to import the Plotly package root failed production compilation with three module-resolution errors. That integration was corrected to the browser distribution and a typed ambient module; the final production build passed. No `@ts-expect-error` suppression is needed for these export imports.
-- All five unused starter SVGs, the favicon, unused research/helper methods and existing model implementations were retained. Six assets were verified against the official Next.js starter: five SVGs match after whitespace trimming and the favicon matches byte for byte. Their upstream notices are preserved in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- `.github/dependabot.yml` and CodeQL were reviewed and retained. `AGENTS.md` contains generic Next.js agent guidance, with no detected internal-only content; it was retained.
+- No automated model/hyperparameter selection, rolling backtest, confidence intervals, automatic seasonal/order search or future-covariate input is introduced by this repair.
+- Row order is treated as time; timestamps, irregular spacing, calendars and duplicate timestamps are not automatically inferred or corrected. Preserved row indices avoid misleading alignment but are not date forecasts.
+- ARIMA order and some architecture choices remain fixed. Neural models are univariate. Seeded CPU checks do not guarantee deterministic GPU/browser forecasts.
+- Saved neural weights and replay metadata are retained, but model reload/portable weight export has no UI workflow. Python fitted models are not persisted.
+- Email verification, password recovery, MFA and centralized session revocation are not implemented. Database throttling supplements, rather than replaces, deployment request controls and monitoring.
+- CDN runtime/package and Google font downloads require network access. Pyodide scientific packages belong to its pinned distribution rather than the npm lockfile. Training twice per model increases resource use; limits and cancellation remain necessary.
+- The Apache license applies to original source; third-party notices and distribution obligations remain separate. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## 5. Verification results
+## Review before committing
 
-Results distinguish executed checks from pending or unexecuted work. Package installation and checks used the committed lockfile without real database credentials.
+Changes span worker/model correctness, the shared pipeline/contracts, authentication routes/helpers and migration, browser state/storage/lifecycle/results, regression tests, CI and documentation. The older source remains in the existing Git history. Installed dependencies, `.next`, generated type files, build caches, private environment files and local credentials remain excluded by `.gitignore`; only the blank `.env.example` is intended for publication.
 
-| Check | Result | Evidence / scope |
-| --- | --- | --- |
-| Final clean `npm ci` | **PASSED** | 623 packages installed from the final lockfile. Audit findings remain as listed above. |
-| `npm run typecheck` | **PASSED** | Next.js route types generated, then `tsc --noEmit`; passed after the corrected Plotly bundle import. |
-| `npm run lint` | **PASSED with 1 warning** | No errors. Existing `@next/next/no-location-assign-relative-destination` warning at `Wizard.tsx:48` retained; changing navigation was outside necessary cleanup. |
-| `npm test` | **PASSED: 7 tests** | Final clean-install run covered JWT secret validation, session lifetime/claims/algorithm/signature/expiry and missing database configuration. No account-route or live database integration is covered. |
-| `npm run build` | **PASSED** | Next.js 16.4.0 Turbopack production build; all application routes generated. |
-| Production Chrome model smoke | **PASSED, repeated on final build** | 60 synthetic rows; all nine models returned finite RMSE/MAE and exactly ten finite forecasts. No model failed, timed out or remained unexecuted; no browser errors were observed. This is integration evidence, not accuracy or performance evidence. |
-| Final-build PNG/CSV/sign-out smoke | **PASSED** | Actual EDA and results Save Graph Image buttons produced files with valid PNG signatures after chart initialization. CSV download and sign-out passed; no console/page errors. |
-| Preview JSON fixtures in host CPython | **PASSED: 6 fixtures** | Checked pandas serialization edge cases; host CPython is not the same runtime as browser Pyodide. |
-| `npm audit --audit-level=high` | **FAILED: exit 1** | 8 affected nodes: 5 high, 3 moderate, 0 critical; this full audit gate also remains in CI. |
-| `npm audit --omit=dev --audit-level=high` | **PASSED threshold: exit 0** | Still reports 3 moderate production-graph nodes; not a vulnerability-free result. |
-| Real Neon signup/login/logout/schema integration | **UNEXECUTED** | No real database credentials were supplied. Browser smoke used a temporary local test session, not a complete account-registration flow. |
-| Linux GitHub Actions and CodeQL execution | **UNEXECUTED** | Workflow files reviewed locally; no repository publication or remote run was performed. |
-| Other browsers, backend/GPU coverage, large-data tests and performance benchmarks | **UNEXECUTED** | No compatibility, speed or benchmark claims inferred from the synthetic smoke. |
-| Staged diff / initial commit | **UNEXECUTED** | No project repository was initialized or staged; the proposed manifest is supplied below. |
+The current review set contains **29 modified existing files, 19 added files and zero deleted files**; there are 68 source candidates in total. New material includes the shared contracts/pipeline/Python snippets/neural builders, authentication service helpers and additive migration, CSV/session helpers, regression/browser tests and the archived audit. A final scan detected no recognizable credential tokens, private-key bodies, credential-bearing URLs or personal local paths; no oversized source files, exact duplicate files or broken relative documentation links were found. All 21 representative private/generated paths were ignored, including Playwright outputs. Every value in `.env.example` is blank. The Git index remained untouched and the existing HEAD stayed at `e18c1ee`.
 
-An earlier results-PNG automation attempt timed out because it clicked before the result chart initialized. Waiting for actual chart readiness made the final check pass; no source change was needed for that timing correction. The earlier Plotly package-root build failure is recorded in section 4 and was resolved before the successful final build.
+From the repository root, review without staging or committing:
 
-## 6. Sensitive-file and generated-output exclusion verification
-
-No actual credentials, private environment file, personal dataset or personal identifier was detected in the proposed source contents. The only environment file proposed for publication is the blank `.env.example`. The known JWT fallback key and dummy database URL were removed. Test identities are placeholders, and temporary audit sessions/fixtures do not enter the manifest.
-
-Ignore behavior was verified for 18 representative private/generated paths, including `.npmrc`, using temporary Git metadata outside the project and the project as its work tree; the blank `.env.example` is allowed. Publication candidates were enumerated with `git ls-files --others --exclude-standard`; the proposed set below includes this report. No `.git`, `node_modules`, `.next`, private environment configuration or local audit output is included.
-
-| Excluded category | Relevant patterns / examples |
-| --- | --- |
-| Private configuration | `.env*`, with only `!.env.example` allowed; `.npmrc`. No project `.npmrc` exists. |
-| Installed dependencies | `/node_modules`, PnP/Yarn local outputs. |
-| Next.js/build outputs | `/.next/`, `/out/`, `/build`, `/dist/`, `next-env.d.ts`, `*.tsbuildinfo`. |
-| Test/cache outputs | `/coverage`, `/.cache/`, Python bytecode/caches, notebook checkpoints. |
-| Local environments/editors | `venv/`, `.venv/`, `env/`, `.vscode/`, `.idea/`, `.history/`, Vercel local state. |
-| Logs, temporary outputs and keys | `*.log`, debug logs, `/tmp/`, `/temp/`, `*.pem`, `*.key`, `*.p12`, `*.pfx`. |
-
-`node_modules`, `.next`, generated `next-env.d.ts` and `tsconfig.tsbuildinfo` are the actual ignored entries present after validation. They were not deleted merely to make the directory appear clean. After writing this report, the publication list was re-enumerated and compared with original-file SHA-256 hashes: 48 candidates, 19 originals changed, seven additions and zero deletions. The embedded manifest matches that list, and the documentation's relative file links resolve. Once the user initializes the project repository, the staged paths and contents still require the final review in section 8.
-
-### Complete proposed initial-commit manifest: 48 files
-
-```text
-.env.example
-.github/dependabot.yml
-.github/workflows/codeql.yml
-.github/workflows/pr-checks.yml
-.gitignore
-.nvmrc
-ADDING_MODELS.md
-AGENTS.md
-AUDIT_REPORT.md
-README.md
-THIRD_PARTY_NOTICES.md
-db/schema.sql
-eslint.config.mjs
-next.config.ts
-package-lock.json
-package.json
-postcss.config.mjs
-public/file.svg
-public/globe.svg
-public/next.svg
-public/vercel.svg
-public/window.svg
-src/app/api/auth/login/route.ts
-src/app/api/auth/logout/route.ts
-src/app/api/auth/me/route.ts
-src/app/api/auth/signup/route.ts
-src/app/favicon.ico
-src/app/globals.css
-src/app/layout.tsx
-src/app/login/page.tsx
-src/app/page.tsx
-src/components/StepEDA.tsx
-src/components/StepModelConfig.tsx
-src/components/StepResults.tsx
-src/components/StepTrain.tsx
-src/components/StepUpload.tsx
-src/components/Wizard.tsx
-src/lib/auth.ts
-src/lib/db.ts
-src/lib/storage.ts
-src/lib/workerHelper.ts
-src/proxy.ts
-src/store/useStore.ts
-src/types/plotly-dist.d.ts
-src/workers/pyodide.worker.ts
-src/workers/tfjs.worker.ts
-tests/auth.test.mjs
-tsconfig.json
-```
-
-## 7. Unresolved licensing, attribution and reproducibility concerns
-
-The original-source copyright/license decision remains open. The verified starter notice resolves attribution for those six assets, but does not establish ownership of every original contribution. Dependencies and served browser assets remain separately licensed; [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) inventories the actual versions and primary upstream references without asserting blanket compatibility.
-
-Publishing this source set is distinct from distributing a compiled application or rehosting third-party runtime files. Deployment/binary distribution needs the notices and source-availability obligations applicable to the exact Plotly bundle, Pyodide/scientific packages, fonts and optional native dependencies. No source license should claim those components as original project work.
-
-The npm lockfile and documented Node version support repeatable installation, but setup still requires network access, a Neon database initialized with `db/schema.sql`, a private random JWT secret and browser capabilities. Pyodide 0.25.0 packages are fetched from jsDelivr; Next.js downloads Google fonts during compilation. The application is not offline/self-contained. Deep training is not seeded, so identical source and data do not guarantee identical forecasts. Real database reproducibility, other browsers and Linux CI remain unverified.
-
-## 8. Reviewing and creating one initial commit after approval
-
-Use the **directory containing `package.json` as the Git repository root**. In the supplied archive this is `time-series-autoML-main`, inside `Provlepsi AI`. Publishing that directory as the repository named Provlepsi-AI makes the root README and `.github/workflows` discoverable without flattening or moving existing work.
-
-The commands below are for the user after resolving/approving the outstanding issues. They have **not** been executed against a project repository. Replace the example location with the actual application directory:
-
-```powershell
-Set-Location 'path\to\Provlepsi-AI'
-npm ci
-npm run typecheck
-npm run lint
-npm test
-npm run build
-npm audit --audit-level=high
-npm audit --omit=dev --audit-level=high
-```
-
-The full audit currently fails for the documented high development findings. Inspect every command's result and address or explicitly approve those findings before proceeding; the production-only threshold does not clear the full gate.
-
-Initialize and stage only when the user approves the proposed initial import:
-
-```powershell
-git init -b main
-git add -- .
+```sh
 git status --short
+git diff --stat
+git diff
+git ls-files --others --exclude-standard
 git diff --cached --stat
-git diff --cached --name-status
-git diff --cached --check
-git diff --cached
 ```
 
-Compare the staged paths with the 48-file manifest and inspect contents, especially the blank environment template, lockfile registry URLs and third-party notices. This additional staged-path check should produce no matches:
-
-```powershell
-$stagedPrivateOrGenerated = git ls-files | Where-Object {
-    $_ -match '(^|/)(node_modules|\.next|out|build|dist|coverage|\.venv|venv|env|__pycache__|\.vscode|\.idea)(/|$)' -or
-    ($_ -match '(^|/)\.env' -and $_ -ne '.env.example') -or
-    $_ -match '(^|/)(\.npmrc|next-env\.d\.ts)$' -or
-    $_ -match '\.(tsbuildinfo|log|pem|key|p12|pfx|pyc|pyo)$'
-}
-if ($stagedPrivateOrGenerated) {
-    $stagedPrivateOrGenerated
-    throw 'Private or generated paths are staged. Review the index before committing.'
-}
-```
-
-After the user approves the staged result and outstanding publication decisions, create **one** initial commit:
-
-```powershell
-git commit -m "Initial import of Provlepsi-AI"
-git status --short
-git log -1 --oneline
-```
-
-No artificial history or extra import commits are needed. Remote configuration, GitHub repository creation and pushing are outside this audit and are not included in these commands.
-
+Review new files as well as the tracked diff, especially the additive database migration and tests. No commit or push is part of this implementation task.

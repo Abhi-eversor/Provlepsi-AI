@@ -12,6 +12,10 @@ export function getSessionSecret() {
 }
 
 export async function createSessionToken(payload: { userId: number; email: string }) {
+  if (!Number.isSafeInteger(payload.userId) || payload.userId <= 0 ||
+      typeof payload.email !== 'string' || !payload.email || payload.email.length > 254) {
+    throw new Error('Cannot create a session for an invalid identity.');
+  }
   return new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -24,9 +28,12 @@ export async function verifySessionToken(token: string) {
     const { payload } = await jwtVerify(token, getSessionSecret(), {
       algorithms: ['HS256'],
       requiredClaims: ['iat', 'exp'],
+      maxTokenAge: '7d',
     });
     if (!Number.isSafeInteger(payload.userId) || (payload.userId as number) <= 0 ||
-        typeof payload.email !== 'string' || !payload.email) {
+        typeof payload.email !== 'string' || !payload.email || payload.email.length > 254 ||
+        typeof payload.iat !== 'number' || typeof payload.exp !== 'number' ||
+        payload.exp <= payload.iat || payload.exp - payload.iat > 7 * 24 * 60 * 60) {
       return null;
     }
     return payload as { userId: number; email: string };

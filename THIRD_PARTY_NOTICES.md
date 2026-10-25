@@ -4,7 +4,7 @@ This document records verified third-party material and licensing considerations
 
 ## Project source license
 
-A license for the project's original source code is pending confirmation by the copyright owner. Apache License 2.0 is recommended if the owner has the necessary rights to license all original contributions. See the [official Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0.html).
+The repository's original source is provided under the existing [Apache License 2.0](LICENSE). That license was already present when the implementation repairs began; it has been preserved. See the [official Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0.html).
 
 That recommendation does not relicense dependencies, fonts, logos, or copied starter material. This inventory is not a blanket compatibility guarantee or a complete notice bundle for compiled distributions.
 
@@ -49,7 +49,7 @@ SOFTWARE.
 
 ## npm dependencies
 
-The dependency implementations are installed with npm and are not vendored into this source repository. `package.json` declares direct dependencies and `package-lock.json` records the resolved versions. The following summary reflects the final lockfile and package license files inspected during the publication audit; the exact installed package license files remain authoritative. The application uses Next.js `16.4.0`. The original starter assets above retain their verified `v16.2.11` provenance.
+The dependency implementations are installed with npm and are not vendored into this source repository. `package.json` declares direct dependencies and `package-lock.json` records the resolved versions. The following summary reflects the updated lockfile; the exact installed package license files remain authoritative. The application uses Next.js `16.4.3`. The original starter assets above retain their verified `v16.2.11` provenance.
 
 | Direct dependency | License summary | Upstream |
 | --- | --- | --- |
@@ -60,12 +60,12 @@ The dependency implementations are installed with npm and are not vendored into 
 | `idb` | ISC | [idb](https://github.com/jakearchibald/idb) |
 | `jose` | MIT | [jose](https://github.com/panva/jose) |
 | `lucide-react` | ISC, with MIT notices for icons derived from Feather | [Lucide license and Feather attribution](https://github.com/lucide-icons/lucide/blob/main/LICENSE) |
-| `next` | MIT | [Next.js 16.4.0 license](https://github.com/vercel/next.js/blob/v16.4.0/license.md) |
+| `next` | MIT | [Next.js 16.4.3 license](https://github.com/vercel/next.js/blob/v16.4.3/license.md) |
 | `plotly.js`, `react-plotly.js` | MIT, with notices for bundled third-party components | [Plotly.js 4.1.2](https://github.com/plotly/plotly.js/tree/v4.1.2), [React Plotly.js](https://github.com/plotly/react-plotly.js) |
 | `react`, `react-dom` | MIT | [React license](https://github.com/facebook/react/blob/main/LICENSE) |
 | `zustand` | MIT | [Zustand](https://github.com/pmndrs/zustand) |
 
-Development dependencies also have their own licenses, including Apache-2.0 for TypeScript and MIT for ESLint and Tailwind CSS. Dependency license metadata alone does not capture every bundled component or distribution requirement. In particular:
+Development dependencies also have their own licenses, including Apache-2.0 for TypeScript and Playwright, and MIT for ESLint and Tailwind CSS. Playwright's separately installed browser binaries retain their own bundled notices; they are not committed here. See the [Playwright license](https://github.com/microsoft/playwright/blob/main/LICENSE). Dependency license metadata alone does not capture every bundled component or distribution requirement. In particular:
 
 - Next.js resolves optional Sharp `0.35.5` packages. Sharp itself is Apache-2.0, while its libvips binaries carry LGPL-3.0-or-later notices. The optional `@img/sharp-wasm32` package declares Apache-2.0, LGPL-3.0-or-later and MIT material; its `@emnapi/runtime` dependency is MIT. See [Sharp's licensing guidance](https://sharp.pixelplumbing.com/install/#licensing). Optional binaries installed locally depend on the operating system and architecture; they remain third-party packages rather than project source.
 - Lightning CSS and axe-core carry MPL-2.0 licenses.

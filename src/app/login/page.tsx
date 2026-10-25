@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mail, Lock, User, Loader2 } from 'lucide-react';
+import { broadcastIdentityChange } from '@/lib/session-events';
 
 type Mode = 'signin' | 'signup';
 
@@ -32,6 +33,7 @@ export default function LoginPage() {
         setError(data.error || 'Something went wrong.');
         return;
       }
+      broadcastIdentityChange();
       router.push('/');
     } catch {
       setError('Network error. Please try again.');
@@ -70,7 +72,7 @@ export default function LoginPage() {
                 <label className="block text-sm text-gray-400 mb-1">Full Name</label>
                 <div className="relative">
                   <User className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input type="text" required value={name} onChange={(e) => setName(e.target.value)}
+                  <input type="text" required maxLength={100} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white text-sm focus:outline-none focus:border-blue-500"
                     placeholder="Jane Doe" />
                 </div>
@@ -82,7 +84,7 @@ export default function LoginPage() {
             <label className="block text-sm text-gray-400 mb-1">Email</label>
             <div className="relative">
               <Mail className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+              <input type="email" required maxLength={254} autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white text-sm focus:outline-none focus:border-blue-500"
                 placeholder="you@example.com" />
             </div>
@@ -92,12 +94,15 @@ export default function LoginPage() {
             <label className="block text-sm text-gray-400 mb-1">Password</label>
             <div className="relative">
               <Lock className="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)}
+              <input type="password" required minLength={mode === 'signup' ? 12 : 1}
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                value={password} onChange={(e) => setPassword(e.target.value)}
                 className="w-full pl-9 pr-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white text-sm focus:outline-none focus:border-blue-500"
                 placeholder="••••••••" />
             </div>
           </div>
 
+          {mode === 'signup' && <p className="text-xs text-gray-400">At least 12 characters; at most 72 UTF-8 bytes.</p>}
           {error && <p className="text-sm text-red-400">{error}</p>}
 
           <button type="submit" disabled={loading}
